@@ -1,3 +1,36 @@
+# Pollard’s Rho 哈希碰撞算法实现（Go 语言）
+
+## 一、项目简介
+
+本项目实现了 **Pollard’s Rho 哈希碰撞算法**，在截断后的 SHA-256 输出空间中寻找两个不同输入，使得它们的哈希结果相同（即发生“碰撞”）。
+
+该算法是密码学中常见的随机算法之一，通过**函数迭代与循环检测**实现哈希碰撞搜索。  
+与传统的“生日攻击（Birthday Attack）”相比，它能在相同时间复杂度下显著降低空间消耗，从而在有限内存条件下完成实验。
+
+---
+
+## 二、算法背景
+
+### 1. 哈希函数与碰撞
+
+哈希函数（Hash Function）是一种将任意长度输入映射为固定长度输出的函数：
+h : {0,1}* → {0,1}^m
+
+go
+Copy code
+若存在两个不同输入 `x1 ≠ x2`，使得：
+h(x1) = h(x2)
+
+markdown
+Copy code
+则称这两个输入构成一次**碰撞（collision）**。
+
+在理想哈希函数中，哈希值分布均匀且无可预测规律。  
+根据“生日悖论（Birthday Paradox）”，要找到一次碰撞，平均需要大约：
+2^(m/2)
+
+yaml
+Copy code
 次哈希计算。
 
 ---
@@ -32,3 +65,96 @@ Pollard’s Rho 算法由 John Pollard 在 1975 年提出，最初用于整数�
 ### 1. 定义迭代函数
 
 定义：
+f(x) = Trunc_m(SHA256(x))
+
+markdown
+Copy code
+其中 `Trunc_m` 表示取哈希值的前 m 位（例如 20 位）。  
+这一步称为**截断（Truncation）**，它将原本 2^256 的巨大空间缩小为可实验的 2^m 范围。
+
+### 2. 构造序列
+
+从随机初始值 `x0` 开始，不断迭代：
+x1 = f(x0)
+x2 = f(x1)
+x3 = f(x2)
+...
+
+markdown
+Copy code
+
+由于状态空间有限（2^m 个可能值），根据**鸽巢原理（Pigeonhole Principle）**，  
+序列必然在有限步内重复，即：
+xi = xj （i < j）
+
+Copy code
+
+此时序列进入循环，结构如下：
+
+x0 → x1 → x2 → x3 → x4
+↑ ↓
+←←←←←←
+
+yaml
+Copy code
+
+这个形状看起来就像“ρ（Rho）”，算法由此得名。
+
+### 3. 循环检测：Brent 算法
+
+为了检测序列何时进入循环，常用两种算法：
+- Floyd 的“龟兔赛跑”法（Tortoise and Hare）
+- Brent 的循环检测法（更高效）
+
+**Brent 算法过程：**
+1. 设定两指针：tortoise（慢）和 hare（快）。
+2. hare 每次移动一步，tortoise 只在每轮检测时重置。
+3. 每当 hare 与 tortoise 相遇时，说明出现循环。
+4. 计算循环长度 λ（lambda）和起点 μ（mu）。
+
+这种方法只需常数空间 `O(1)`，非常适合哈希碰撞实验。
+
+---
+
+## 四、算法实现逻辑（Go 语言）
+
+### 1. 整体流程
+
+1. 定义迭代函数 `f(x)`，返回截断后的 SHA-256 哈希。
+2. 从随机种子 `x0` 开始执行 Brent 算法，检测序列中的循环。
+3. 当检测到循环时，计算循环的起点 μ 和长度 λ。
+4. 重新生成序列，使用 map 保存“截断哈希值 → 输入”。
+5. 当出现重复哈希值时，即找到碰撞对 `(msg1, msg2)`。
+
+---
+
+### 2. 核心函数设计
+
+| 函数 | 功能 |
+|------|------|
+| `truncHash(data, m)` | 计算 SHA-256 并截断前 m 位 |
+| `fIter(state, m)` | 定义迭代函数 f(x) |
+| `brentCycleFinding(seed, m)` | 检测循环并返回 (mu, lambda) |
+| `recoverCollision(seed, m, mu, lam)` | 在序列中恢复实际的碰撞输入 |
+| `main()` | 程序入口，执行完整流程并打印结果 |
+
+---
+
+### 3. 位截断的实现
+
+在 Go 中计算 SHA-256 后，结果为 32 字节（256 位）。  
+我们只需保留前 `ceil(m/8)` 字节，再对首字节进行掩码处理：
+```go
+byteLen := (m + 7) / 8
+mask := 0xFF >> (byteLen*8 - m)
+trunc := hash[:byteLen]
+trunc[0] &= byte(mask)
+
+函数 f(x):
+    return trunc_m(SHA256(x))
+
+主程序:
+    seed = 随机生成
+    (mu, lambda) = BrentCycleFinding(seed, m)
+    collision = recoverCollision(seed, m, mu, lambda)
+    输出结果
